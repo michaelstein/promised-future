@@ -3,7 +3,7 @@ from conans import ConanFile
 
 class PromisedFutureConan(ConanFile):
 	name = "PromisedFuture"
-	version = "1.0"
+	version = "1.1"
 	license = "MIT license"
 	url = "https://github.com/michaelstein/promised-future"
 	author = "Michael Stein"

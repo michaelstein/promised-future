@@ -1,9 +1,8 @@
-from conans import ConanFile, tools
+from conans import ConanFile
 from conan.tools.cmake import CMake, CMakeDeps
-import os
 
 
-class PromisedFutureTestConan(ConanFile):
+class PromisedFutureDevConan(ConanFile):
 	settings = "os", "compiler", "build_type", "arch"
 	generators = "CMakeDeps", "CMakeToolchain", "virtualenv", "virtualrunenv", "virtualbuildenv"
 	
@@ -26,8 +25,3 @@ class PromisedFutureTestConan(ConanFile):
 		self.copy("*.dll", dst="bin", src="bin")
 		self.copy("*.dylib*", dst="bin", src="lib")
 		self.copy('*.so*', dst='bin', src='lib')
-
-	def test(self):
-		if not tools.cross_building(self):
-			os.chdir("bin")
-			self.run(".%sPromisedFuture_Test" % os.sep)
