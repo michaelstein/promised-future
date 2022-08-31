@@ -4,6 +4,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <tuple>
 #include <type_traits>
 #include <vector>
 
@@ -22,6 +23,8 @@ class AbstractPromise
 public:
 	virtual ~AbstractPromise() = default;
 	virtual State state() const = 0;
+	virtual void wait() = 0;
+	virtual void waitAll() = 0;
 };
 
 using Promises = std::vector<std::shared_ptr<AbstractPromise>>;
@@ -114,10 +117,17 @@ public:
 		then<void>(onResolved, onRejected);
 	}
 
-	void wait()
+	void wait() override
 	{
 		if (_future.valid())
 			_future.wait();
+	}
+
+	void waitAll() override
+	{
+		wait();
+		for (auto child : _chain)
+			child->waitAll();
 	}
 
 	std::optional<T> value() const
@@ -188,7 +198,7 @@ inline SharedPromise<T, E> reject(const E& error)
 	return std::make_shared<Promise<T, E>>(Promise<T, E>::reject(error));
 }
 
-Promises::size_type clear(Promises& promises)
+Promises::size_type clean(Promises& promises)
 {
 	Promises::size_type ret = 0;
 	auto iter = promises.cbegin();
@@ -202,6 +212,62 @@ Promises::size_type clear(Promises& promises)
 			++ret;
 		}
 	}
+	return ret;
+}
+
+void wait(Promises& promises)
+{
+	for (auto p : promises)
+		p->wait();
+}
+
+namespace details {
+
+//template<class... ResultType>
+//struct zip
+//{
+//	template<class... ErrorType>
+//	struct with
+//	{
+//		using Type = typename std::tuple<std::pair<ResultType, ErrorType>...>;
+//	};
+//};
+//
+//template<class... SP>
+//using Tuple = typename zip<typename SP::element_type::ValueType...>::with<typename SP::element_type::ErrorType...>::Type;
+
+template<class FirstPromise, class... OtherPromises>
+void variadicWait(FirstPromise promise, OtherPromises... others)
+{
+	promise->wait();
+	if constexpr (sizeof...(others) > 0)
+		variadicWait(others...);
+}
+
+template<size_t Index, class TupleType, class FirstPromise, class... OtherPromises>
+void variadicAll(std::mutex& mutex, TupleType& data, FirstPromise promise, OtherPromises... others)
+{
+	promise->finally([&mutex, &data](const auto& val) {
+		std::lock_guard lock(mutex);
+		std::get<Index>(data) = val;
+	});
+
+	if constexpr (sizeof...(others) > 0)
+		variadicAll<Index + 1>(mutex, data, others...);
+}
+
+}
+
+template<class ErrorT = uint8_t, class... SP, class ResultT = std::tuple<typename SP::element_type::ValueType...>>
+SharedPromise<ResultT, ErrorT> all(SP... promises)
+{
+	auto ret = promise<ResultT, ErrorT>([promises...](auto resolve, auto reject) {
+		std::mutex mutex;
+		ResultT res{};
+		details::variadicAll<0>(mutex, res, promises...);
+		details::variadicWait(promises...);
+		resolve(res);
+	});
 	return ret;
 }
 
