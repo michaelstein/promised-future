@@ -239,7 +239,7 @@ namespace details {
 template<class FirstPromise, class... OtherPromises>
 void variadicWait(FirstPromise promise, OtherPromises... others)
 {
-	promise->wait();
+	promise->waitAll();
 	if constexpr (sizeof...(others) > 0)
 		variadicWait(others...);
 }

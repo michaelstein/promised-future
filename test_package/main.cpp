@@ -46,7 +46,7 @@ TEST(pf, multiple)
 	});
 
 	auto p3 = pf::promise<std::string>([](auto resolve, auto reject) {
-		std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+		std::this_thread::sleep_for(std::chrono::milliseconds(3000));
 		std::cout << "three\n";
 		resolve("three");
 	});
