@@ -31,7 +31,7 @@ TEST(pf, simple)
 	std::cout << "Three\n";
 }
 
-TEST(pf, multiple)
+TEST(pf, allTuple)
 {
 	auto p1 = pf::promise<int>([](auto resolve, auto reject) {
 		std::this_thread::sleep_for(std::chrono::milliseconds(2000));
@@ -57,6 +57,43 @@ TEST(pf, multiple)
 		std::cout << val1 << " "
 			<< val2 << " "
 			<< val3 << "\n";
+	});
+}
+
+TEST(pf, allVector)
+{
+	std::vector<pf::SharedPromise<int>> container;
+	std::cout << "Zero\n";
+
+	container.push_back(pf::promise<int>([](auto resolve, auto reject) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(200));
+		std::cout << "1\n";
+		resolve(1);
+	}));
+
+	std::cout << "One\n";
+
+	container.push_back(pf::promise<int>([](auto resolve, auto reject) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(300));
+		std::cout << "2\n";
+		resolve(2);
+	}));
+
+	std::cout << "Two\n";
+
+	container.push_back(pf::promise<int>([](auto resolve, auto reject) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(400));
+		std::cout << "3\n";
+		resolve(3);
+	}));
+
+	std::cout << "Three\n";
+	
+	auto res = pf::all(container);
+	res->finally([](const auto& values) {
+		for (const auto& val : values)
+			std::cout << val << " ";
+		std::cout << "\n";
 	});
 }
 

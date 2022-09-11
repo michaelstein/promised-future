@@ -1,4 +1,5 @@
 #pragma once
+#include <deque>
 #include <functional>
 #include <future>
 #include <memory>
@@ -23,8 +24,10 @@ class AbstractPromise
 public:
 	virtual ~AbstractPromise() = default;
 	virtual State state() const = 0;
-	virtual void wait() = 0;
-	virtual void waitAll() = 0;
+	virtual void wait() const = 0;
+	virtual void waitAll() const = 0;
+	virtual std::vector<std::shared_ptr<AbstractPromise>> chain() const = 0;
+	virtual std::vector<std::shared_ptr<AbstractPromise>> clean() = 0;
 };
 
 using Promises = std::vector<std::shared_ptr<AbstractPromise>>;
@@ -117,13 +120,13 @@ public:
 		then<void>(onResolved, onRejected);
 	}
 
-	void wait() override
+	void wait() const override
 	{
 		if (_future.valid())
 			_future.wait();
 	}
 
-	void waitAll() override
+	void waitAll() const override
 	{
 		wait();
 		for (auto child : _chain)
@@ -139,6 +142,32 @@ public:
 	const std::optional<T>& valueRef() const
 	{
 		return _value;
+	}
+
+	Promises chain() const override
+	{
+		return _chain;
+	}
+
+	Promises clean() override
+	{
+		Promises ret;
+		std::deque queue(_chain.cbegin(), _chain.cend());
+		
+		auto iter = queue.begin();
+		while (iter != queue.end()) {
+			const auto ptr = *iter;
+			const auto state = ptr ? ptr->state() : State::INVALID;
+			if (state == State::PENDING) {
+				ret.push_back(ptr);
+			} else {
+				const auto chain = ptr->chain();
+				queue.insert(queue.end(), chain.cbegin(), chain.cend());
+			}
+			iter = queue.erase(iter);
+		}
+
+		return ret;
 	}
 
 	static This resolve(const T& value)
@@ -181,13 +210,13 @@ template<class T, class E = uint8_t>
 using SharedPromise = std::shared_ptr<Promise<T, E>>;
 
 template<class T, class E = uint8_t>
-inline SharedPromise<T, E> promise(std::function<void(typename Promise<T, E>::ResolveFunction, typename Promise<T, E>::RejectFunction)> asyncFunc)
+[[nodiscard]] inline SharedPromise<T, E> promise(std::function<void(typename Promise<T, E>::ResolveFunction, typename Promise<T, E>::RejectFunction)> asyncFunc)
 {
 	return std::make_shared<Promise<T, E>>(asyncFunc);
 }
 
 template<class E = uint8_t, class T>
-inline SharedPromise<T, E> resolve(const T& value)
+[[nodiscard]] inline SharedPromise<T, E> resolve(const T& value)
 {
 	return std::make_shared<Promise<T, E>>(Promise<T, E>::resolve(value));
 }
@@ -198,27 +227,33 @@ inline SharedPromise<T, E> reject(const E& error)
 	return std::make_shared<Promise<T, E>>(Promise<T, E>::reject(error));
 }
 
-Promises::size_type clean(Promises& promises)
+void clean(Promises& promises)
 {
-	Promises::size_type ret = 0;
 	auto iter = promises.cbegin();
-	while (iter != promises.cend())
-	{
+	while (iter != promises.cend()) {
 		const auto ptr = *iter;
 		const auto state = ptr ? ptr->state() : State::INVALID;
-		if (state != State::PENDING)
-		{
+		if (state != State::PENDING) {
 			iter = promises.erase(iter);
-			++ret;
+			auto children = ptr->clean();
+			iter = promises.insert(iter, children.cbegin(), children.cend());
+			std::advance(iter, children.size());
+		} else {
+			iter = std::next(iter);
 		}
 	}
-	return ret;
 }
 
-void wait(Promises& promises)
+void wait(const Promises& promises)
 {
-	for (auto p : promises)
+	for (const auto& p : promises)
 		p->wait();
+}
+
+void waitAll(const Promises& promises)
+{
+	for (const auto& p : promises)
+		p->waitAll();
 }
 
 namespace details {
@@ -259,16 +294,29 @@ void variadicAll(std::mutex& mutex, TupleType& data, FirstPromise promise, Other
 }
 
 template<class ErrorT = uint8_t, class... SP, class ResultT = std::tuple<typename SP::element_type::ValueType...>>
-SharedPromise<ResultT, ErrorT> all(SP... promises)
+[[nodiscard]] SharedPromise<ResultT, ErrorT> all(SP... promises)
 {
-	auto ret = promise<ResultT, ErrorT>([promises...](auto resolve, auto reject) {
+	return promise<ResultT, ErrorT>([promises...](auto resolve, auto reject) {
 		std::mutex mutex;
 		ResultT res{};
 		details::variadicAll<0>(mutex, res, promises...);
 		details::variadicWait(promises...);
 		resolve(res);
 	});
-	return ret;
+}
+
+template<class T, class E>
+[[nodiscard]] SharedPromise<std::vector<T>, E> all(const std::vector<SharedPromise<T, E>>& promises)
+{
+	return promise<std::vector<T>, E>([promises](auto resolve, auto reject) {
+		std::vector<T> ret;
+		for (const auto& p : promises) {
+			p->wait();
+			const auto& val = p->valueRef();
+			ret.push_back(val.has_value() ? val.value() : T{});
+		}
+		resolve(ret);
+	});
 }
 
 }
